@@ -1,13 +1,16 @@
 # PostgREST Demo
 
-This project provides a simple setup to expose a PostgreSQL database as a RESTful API using [PostgREST](https://postgrest.org/). It includes a Docker configuration for running PostgREST, Swagger UI for documentation, and a SQL script to set up the necessary database permissions.
+This project provides a unified Docker image to expose a PostgreSQL database as a RESTful API using [PostgREST](https://postgrest.org/) and serve [Swagger UI](https://swagger.io/tools/swagger-ui/) for documentation.
+
+It uses `supervisord` to run both PostgREST and Nginx (for Swagger UI) in a single container.
 
 ## Project Structure
 
-- `Dockerfile.postgrest`: Configures the PostgREST container.
-- `Dockerfile.swagger`: Configures the Swagger UI container.
-- `docker-compose.yml`: Orchestrates both services.
-- `permissions.sql`: SQL script to create the anonymous web role and grant read-only permissions to specific tables.
+- `Dockerfile`: Multi-stage build that packages PostgREST and Swagger UI.
+- `nginx.conf`: Nginx configuration for serving Swagger UI.
+- `supervisord.conf`: Supervisor configuration to manage PostgREST and Nginx processes.
+- `start.sh`: Entrypoint script to configure the Swagger UI API URL and start Supervisor.
+- `permissions.sql`: SQL script to set up the necessary database permissions.
 
 ## Prerequisites
 
@@ -18,96 +21,49 @@ This project provides a simple setup to expose a PostgreSQL database as a RESTfu
 
 ### 1. Database Configuration
 
-Before running the API, you need to configure your PostgreSQL database. Run the `permissions.sql` script against your database to create the `web_anon` role and grant it access to the necessary tables:
+Before running the API, configure your PostgreSQL database. Run the `permissions.sql` script to create the `web_anon` role and grant it access to the necessary tables:
 
 ```bash
 psql -d <your_database_name> -f permissions.sql
 ```
 
-The script grants `SELECT` permissions to the `web_anon` role for the following tables in the `public` schema:
-- `blog`
-- `conferences`
-- `microblog`
-- `notes`
-- `tags`
-- (and associated join tables)
+This grants `SELECT` permissions to the `web_anon` role for specific tables in the `public` schema.
 
-### 2. Running with Docker Compose (Recommended)
+### 2. Build the Docker Image
 
-This is the easiest way to run both PostgREST and Swagger UI.
+```bash
+docker build -t postgrest-demo .
+```
 
-1. Set the `PG_CONNECTION_STRING` environment variable with your database connection string.
-   ```bash
-   export PG_CONNECTION_STRING="postgres://user:password@host:port/dbname"
-   ```
+### 3. Run the Container
 
-2. Start the services:
-   ```bash
-   docker compose up --build
-   ```
+Run the container, providing the database connection string. Ensure the container can access your host's network if the database is running locally (e.g., using `host.docker.internal` on Mac/Windows or `--network host` on Linux).
+
+```bash
+docker run -p 3000:3000 -p 8080:8080 \
+  -e PGRST_DB_URI="postgres://user:password@host:port/dbname" \
+  -e PGRST_DB_SCHEMA="public" \
+  -e PGRST_DB_ANON_ROLE="web_anon" \
+  -e API_URL="http://localhost:3000/" \
+  postgrest-demo
+```
 
 The services will be available at:
 - **API**: `http://localhost:3000`
 - **Swagger UI**: `http://localhost:8080`
 
-#### Changing the Swagger API URL (Docker Compose)
+## Environment Variables
 
-By default, Swagger UI points to `http://localhost:3000/`. To change this, you can modify the `API_URL` environment variable in `docker-compose.yml`:
-
-```yaml
-  swagger:
-    ...
-    environment:
-      API_URL: http://your-custom-url:3000/
-```
-
-### 3. Running Manually
-
-If you prefer to run the containers individually:
-
-#### PostgREST Service
-
-1. Build the image:
-   ```bash
-   docker build -t postgrest-demo -f Dockerfile.postgrest .
-   ```
-
-2. Run the container:
-   ```bash
-   docker run -p 3000:3000 \
-     -e PGRST_DB_URI="postgres://user:password@host:port/dbname" \
-     -e PGRST_DB_SCHEMA="public" \
-     -e PGRST_DB_ANON_ROLE="web_anon" \
-     postgrest-demo
-   ```
-
-#### Swagger UI Service
-
-1. Build the image:
-   ```bash
-   docker build -t swagger-ui-demo -f Dockerfile.swagger .
-   ```
-
-2. Run the container:
-   ```bash
-   docker run -p 8080:8080 \
-     -e API_URL="http://localhost:3000/" \
-     swagger-ui-demo
-   ```
-
-#### Changing the Swagger API URL (Manual)
-
-To change the target API URL when running manually, update the `-e API_URL` flag:
-
-```bash
-docker run -p 8080:8080 \
-  -e API_URL="http://your-new-api-url:3000/" \
-  swagger-ui-demo
-```
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `PGRST_DB_URI` | PostgreSQL connection string | (Required) |
+| `PGRST_DB_SCHEMA` | Schema to expose | `public` |
+| `PGRST_DB_ANON_ROLE` | Database role for anonymous requests | `web_anon` |
+| `API_URL` | URL that Swagger UI should point to | `http://localhost:3000/` |
 
 ## API Usage
 
-Once running, you can access the API.
+Once running, you can access the API directly or via Swagger UI.
 
 Example request:
 ```bash
